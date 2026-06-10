@@ -136,9 +136,10 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null); // { uid, name, brazil, groups, knockout }
   const [nameInput, setNameInput] = useState("");
   const [participants, setParticipants] = useState({}); // uid → participant data
-  const [adminResults, setAdminResults] = useState({ brazil:{}, groups:{}, knockout:{}, knockoutUnlocked:false });
+  const [adminResults, setAdminResults] = useState({ brazil:{}, groups:{}, knockout:{}, knockoutUnlocked:false, guessesLocked:false, guessesVisible:false });
   const [adminCode, setAdminCode] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
+  const [viewingUid, setViewingUid] = useState(null); // uid whose guesses we're viewing (read-only)
   const unsubRef = useRef(null);
 
   // ── Init: sign in anonymously, load admin results, subscribe to participants
@@ -211,13 +212,15 @@ export default function App() {
   );
 
   if (screen==="register") return (
-    <RegisterScreen nameInput={nameInput} setNameInput={setNameInput} onRegister={handleRegister} />
+    <RegisterScreen nameInput={nameInput} setNameInput={setNameInput}
+      onRegister={handleRegister} locked={adminResults.guessesLocked} />
   );
 
   if (screen==="home") return (
     <HomeScreen
       currentUser={currentUser} sorted={sorted}
       getTotal={p=>calcTotal(p,adminResults)}
+      adminResults={adminResults}
       onGuesses={()=>setScreen("guesses")}
       onAdmin={()=>setScreen("admin-login")}
       onRanking={()=>setScreen("ranking")}
@@ -243,22 +246,38 @@ export default function App() {
 
   if (screen==="ranking") return (
     <RankingScreen sorted={sorted} getTotal={p=>calcTotal(p,adminResults)}
-      onBack={()=>setScreen("home")} currentUid={currentUid} />
+      onBack={()=>setScreen("home")} currentUid={currentUid}
+      guessesVisible={adminResults.guessesVisible}
+      onViewGuesses={uid=>{ setViewingUid(uid); setScreen("view-guesses"); }}
+    />
   );
 
   if (screen==="guesses") return (
     <GuessesScreen
       user={currentUser} adminResults={adminResults}
+      locked={adminResults.guessesLocked}
       onSave={saveGuesses} saveStatus={saveStatus}
       onBack={()=>setScreen("home")}
     />
   );
 
+  if (screen==="view-guesses") {
+    const viewed = participants[viewingUid];
+    return (
+      <GuessesScreen
+        user={viewed} adminResults={adminResults}
+        locked={true} readOnly={true}
+        onSave={()=>{}} saveStatus=""
+        onBack={()=>setScreen("ranking")}
+      />
+    );
+  }
+
   return null;
 }
 
 // ─── REGISTER ────────────────────────────────────────────────────────────────
-function RegisterScreen({ nameInput, setNameInput, onRegister }) {
+function RegisterScreen({ nameInput, setNameInput, onRegister, locked }) {
   return (
     <div style={{ maxWidth:400,margin:"0 auto",padding:"3rem 1rem" }}>
       <div style={{ textAlign:"center",marginBottom:"2rem" }}>
@@ -272,24 +291,33 @@ function RegisterScreen({ nameInput, setNameInput, onRegister }) {
           FAMÍLIA LINDA
         </div>
       </div>
-      <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem" }}>
-        <p style={{ margin:"0 0 4px",fontWeight:500,fontSize:16 }}>Bem-vindo! 👋</p>
-        <p style={{ margin:"0 0 16px",fontSize:13,color:"var(--color-text-secondary)" }}>Como você quer ser chamado no bolão?</p>
-        <input type="text" placeholder="Seu nome" value={nameInput}
-          onChange={e=>setNameInput(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&onRegister()}
-          style={{ width:"100%",marginBottom:12,fontSize:16 }} autoFocus />
-        <button onClick={onRegister} style={{ width:"100%",fontWeight:500,padding:"10px" }}
-          disabled={!nameInput.trim()}>
-          Entrar no bolão <i className="ti ti-arrow-right" />
-        </button>
-      </div>
+      {locked ? (
+        <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem",textAlign:"center" }}>
+          <div style={{ fontSize:36,marginBottom:8 }}>🔒</div>
+          <p style={{ margin:"0 0 6px",fontWeight:500,fontSize:16 }}>Palpites encerrados</p>
+          <p style={{ margin:0,fontSize:13,color:"var(--color-text-secondary)" }}>O prazo para entrar no bolão já foi encerrado pelo administrador.</p>
+        </div>
+      ) : (
+        <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem" }}>
+          <p style={{ margin:"0 0 4px",fontWeight:500,fontSize:16 }}>Bem-vindo! 👋</p>
+          <p style={{ margin:"0 0 16px",fontSize:13,color:"var(--color-text-secondary)" }}>Como você quer ser chamado no bolão?</p>
+          <input type="text" placeholder="Seu nome" value={nameInput}
+            onChange={e=>setNameInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&onRegister()}
+            style={{ width:"100%",marginBottom:12,fontSize:16 }} autoFocus />
+          <button onClick={onRegister} style={{ width:"100%",fontWeight:500,padding:"10px" }}
+            disabled={!nameInput.trim()}>
+            Entrar no bolão <i className="ti ti-arrow-right" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeScreen({ currentUser, sorted, getTotal, onGuesses, onAdmin, onRanking, onRules }) {
+function HomeScreen({ currentUser, sorted, getTotal, adminResults, onGuesses, onAdmin, onRanking, onRules }) {
+  const locked = adminResults.guessesLocked;
   return (
     <div style={{ maxWidth:480,margin:"0 auto",padding:"2rem 1rem" }}>
       <div style={{ textAlign:"center",marginBottom:"2rem" }}>
@@ -306,6 +334,14 @@ function HomeScreen({ currentUser, sorted, getTotal, onGuesses, onAdmin, onRanki
         <p style={{ margin:0,fontSize:12,color:"var(--color-text-secondary)" }}>EUA · México · Canadá · 11 Jun – 19 Jul</p>
       </div>
 
+      {/* Lock status banner */}
+      {locked && (
+        <div style={{ background:"var(--color-background-warning)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-md)",padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:8 }}>
+          <span style={{ fontSize:16 }}>🔒</span>
+          <p style={{ margin:0,fontSize:13,color:"var(--color-text-warning)",fontWeight:500 }}>Palpites encerrados — edições bloqueadas</p>
+        </div>
+      )}
+
       {/* Current user card */}
       <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.25rem",marginBottom:"1rem" }}>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
@@ -314,7 +350,7 @@ function HomeScreen({ currentUser, sorted, getTotal, onGuesses, onAdmin, onRanki
             <p style={{ margin:0,fontSize:16,fontWeight:500 }}>{currentUser?.name}</p>
           </div>
           <button onClick={onGuesses} style={{ padding:"8px 18px",fontWeight:500 }}>
-            Meus palpites <i className="ti ti-edit" />
+            {locked ? "Ver meus palpites" : "Meus palpites"} <i className={`ti ti-${locked?"eye":"edit"}`} />
           </button>
         </div>
       </div>
@@ -354,7 +390,7 @@ function HomeScreen({ currentUser, sorted, getTotal, onGuesses, onAdmin, onRanki
 }
 
 // ─── GUESSES SCREEN ───────────────────────────────────────────────────────────
-function GuessesScreen({ user, adminResults, onSave, saveStatus, onBack }) {
+function GuessesScreen({ user, adminResults, locked, readOnly, onSave, saveStatus, onBack }) {
   const [tab, setTab] = useState("brasil");
   const [local, setLocal] = useState(() => ({
     brazil: user?.brazil || {},
@@ -362,17 +398,23 @@ function GuessesScreen({ user, adminResults, onSave, saveStatus, onBack }) {
     knockout: user?.knockout || {},
   }));
 
+  const isReadOnly = locked || readOnly;
+
   function handleSave() {
+    if (isReadOnly) return;
     onSave({ ...user, ...local });
   }
 
   function updBrazil(gId, val) {
+    if (isReadOnly) return;
     setLocal(l => ({ ...l, brazil: { ...l.brazil, [gId]: val } }));
   }
   function updGroup(gId, field, team) {
+    if (isReadOnly) return;
     setLocal(l => ({ ...l, groups: { ...l.groups, [gId]: { ...(l.groups[gId]||{}), [field]: team } } }));
   }
   function updKO(rId, idx, team) {
+    if (isReadOnly) return;
     setLocal(l => {
       const slots = [...(l.knockout[rId]||[])]; slots[idx] = team||null;
       const ri = KO_ROUNDS.findIndex(r=>r.id===rId);
@@ -388,68 +430,116 @@ function GuessesScreen({ user, adminResults, onSave, saveStatus, onBack }) {
   }
 
   return (
-    <div style={{ maxWidth:720,margin:"0 auto",padding:"1.5rem 1rem" }}>
-      <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem" }}>
-        <button onClick={onBack} style={{ background:"none",border:"none",cursor:"pointer",padding:0 }}>
-          <i className="ti ti-arrow-left" style={{ fontSize:20,color:"var(--color-text-secondary)" }} />
+    <div style={{ maxWidth:720,margin:"0 auto",padding:"12px 12px 2rem" }}>
+      <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:"1rem" }}>
+        <button onClick={onBack} style={{ background:"none",border:"none",cursor:"pointer",padding:"4px",flexShrink:0 }}>
+          <i className="ti ti-arrow-left" style={{ fontSize:22,color:"var(--color-text-secondary)" }} />
         </button>
-        <div>
-          <p style={{ margin:0,fontSize:12,color:"var(--color-text-secondary)" }}>Palpites de</p>
-          <h2 style={{ margin:0,fontSize:18 }}>{user?.name}</h2>
+        <div style={{ flex:1,minWidth:0 }}>
+          <p style={{ margin:0,fontSize:11,color:"var(--color-text-secondary)" }}>{readOnly?"Palpites de":"Seus palpites"}</p>
+          <h2 style={{ margin:0,fontSize:17,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{user?.name}</h2>
         </div>
-        <button onClick={handleSave} style={{ marginLeft:"auto",display:"flex",alignItems:"center",gap:6,padding:"7px 16px" }}>
-          <i className="ti ti-device-floppy" />
-          {saveStatus==="saved"?"✓ Salvo!":saveStatus==="saving"?"Salvando...":"Salvar"}
-        </button>
+        {!isReadOnly && (
+          <button onClick={handleSave} style={{ display:"flex",alignItems:"center",gap:5,padding:"7px 14px",flexShrink:0,fontSize:13 }}>
+            <i className="ti ti-device-floppy" />
+            {saveStatus==="saved"?"✓ Salvo!":saveStatus==="saving"?"...":"Salvar"}
+          </button>
+        )}
+        {isReadOnly && !readOnly && (
+          <div style={{ display:"flex",alignItems:"center",gap:5,padding:"6px 10px",background:"var(--color-background-warning)",borderRadius:"var(--border-radius-md)",fontSize:12,color:"var(--color-text-warning)",flexShrink:0 }}>
+            🔒 Somente leitura
+          </div>
+        )}
       </div>
       <TabBar
         tabs={[{id:"brasil",label:"Brasil"},{id:"grupos",label:"Grupos"},{id:"matamata",label:"Mata-mata"}]}
         active={tab} onChange={setTab}
       />
-      {tab==="brasil" && <BrazilTab p={local} adminResults={adminResults} onBrazil={updBrazil} />}
-      {tab==="grupos" && <GroupsTab p={local} adminResults={adminResults} onGroup={updGroup} />}
-      {tab==="matamata" && <KOTab p={local} adminResults={adminResults} onKO={updKO} />}
+      {tab==="brasil" && <BrazilTab p={local} adminResults={adminResults} onBrazil={updBrazil} readOnly={isReadOnly} />}
+      {tab==="grupos" && <GroupsTab p={local} adminResults={adminResults} onGroup={updGroup} readOnly={isReadOnly} />}
+      {tab==="matamata" && <KOTab p={local} adminResults={adminResults} onKO={updKO} readOnly={isReadOnly} />}
     </div>
   );
 }
 
 // ─── BRAZIL TAB ───────────────────────────────────────────────────────────────
-function BrazilTab({ p, adminResults, onBrazil }) {
+function BrazilTab({ p, adminResults, onBrazil, readOnly }) {
   return (
     <div>
-      <div style={{ background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"10px 14px",marginBottom:14 }}>
-        <p style={{ margin:0,fontSize:12,color:"var(--color-text-secondary)" }}>
-          Placar exato: 20pts · Vencedor + saldo de gols: 10pts · Acertou vencedor: 5pts · Errou: 0pts
+      <div style={{ background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"8px 12px",marginBottom:12 }}>
+        <p style={{ margin:0,fontSize:11,color:"var(--color-text-secondary)",lineHeight:1.5 }}>
+          🎯 Placar exato: 20pts · ⚽ Vencedor + saldo: 10pts · ✅ Vencedor: 5pts · ❌ Errou: 0pts
         </p>
       </div>
       {BRAZIL_GAMES.map(game=>{
-        const home=game.home?"Brasil":game.opponent, away=game.home?game.opponent:"Brasil";
-        const guess=p.brazil[game.id]||{homeGoals:"",awayGoals:""};
-        const result=adminResults.brazil[game.id]||{};
-        const pts=calcBrazilPts(guess,result);
+        // Brasil always on the left
+        const brazilHome = game.home;
+        const opponent = game.opponent;
+        const guess = p.brazil[game.id]||{homeGoals:"",awayGoals:""};
+        // brazilGoals is always homeGoals in our data model (Brasil is "home" in the guess)
+        // but visually Brasil always appears left, so we just label accordingly
+        const result = adminResults.brazil[game.id]||{};
+        const pts = calcBrazilPts(guess, result);
+        const hasResult = result.homeGoals!==undefined && result.homeGoals!=="";
+
         return (
-          <div key={game.id} style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:10 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-              <span style={{ fontSize:13,color:"var(--color-text-secondary)" }}>{game.label} · {game.date}</span>
+          <div key={game.id} style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"12px 14px",marginBottom:10 }}>
+            {/* Header row */}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+              <span style={{ fontSize:12,color:"var(--color-text-secondary)" }}>{game.label} · {game.date}</span>
               <PtsBadge pts={pts} max={20} />
             </div>
-            <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
-              <Flag team={home} size={28} />
-              <span style={{ fontSize:14,minWidth:55 }}>{home}</span>
-              <input type="number" min="0" max="20" value={guess.homeGoals}
-                onChange={e=>onBrazil(game.id,{...guess,homeGoals:e.target.value})}
-                style={{ width:52,textAlign:"center",fontSize:20,fontWeight:500 }} placeholder="0" />
-              <span style={{ fontSize:18,color:"var(--color-text-secondary)" }}>×</span>
-              <input type="number" min="0" max="20" value={guess.awayGoals}
-                onChange={e=>onBrazil(game.id,{...guess,awayGoals:e.target.value})}
-                style={{ width:52,textAlign:"center",fontSize:20,fontWeight:500 }} placeholder="0" />
-              <span style={{ fontSize:14,minWidth:55 }}>{away}</span>
-              <Flag team={away} size={28} />
+
+            {/* Score row: Brasil | input × input | Adversário */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",gap:8 }}>
+              {/* Left: Brasil */}
+              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                <Flag team="Brasil" size={30} />
+                <span style={{ fontSize:14,fontWeight:500 }}>Brasil</span>
+              </div>
+
+              {/* Center: score inputs */}
+              <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                <input type="number" min="0" max="20"
+                  value={brazilHome ? guess.homeGoals : guess.awayGoals}
+                  onChange={e => onBrazil(game.id, brazilHome
+                    ? {...guess, homeGoals:e.target.value}
+                    : {...guess, awayGoals:e.target.value}
+                  )}
+                  readOnly={readOnly} disabled={readOnly}
+                  style={{ width:48,textAlign:"center",fontSize:22,fontWeight:600,padding:"6px 0" }}
+                  placeholder="0"
+                />
+                <span style={{ fontSize:16,color:"var(--color-text-tertiary)",fontWeight:300 }}>×</span>
+                <input type="number" min="0" max="20"
+                  value={brazilHome ? guess.awayGoals : guess.homeGoals}
+                  onChange={e => onBrazil(game.id, brazilHome
+                    ? {...guess, awayGoals:e.target.value}
+                    : {...guess, homeGoals:e.target.value}
+                  )}
+                  readOnly={readOnly} disabled={readOnly}
+                  style={{ width:48,textAlign:"center",fontSize:22,fontWeight:600,padding:"6px 0" }}
+                  placeholder="0"
+                />
+              </div>
+
+              {/* Right: Adversário */}
+              <div style={{ display:"flex",alignItems:"center",gap:8,justifyContent:"flex-end" }}>
+                <span style={{ fontSize:14,fontWeight:500,textAlign:"right" }}>{opponent}</span>
+                <Flag team={opponent} size={30} />
+              </div>
             </div>
-            {result.homeGoals!==undefined&&result.homeGoals!==""&&(
-              <p style={{ margin:"10px 0 0",fontSize:12,color:"var(--color-text-secondary)" }}>
-                Resultado: {home} {result.homeGoals} × {result.awayGoals} {away}
-              </p>
+
+            {/* Result row */}
+            {hasResult && (
+              <div style={{ marginTop:10,padding:"6px 10px",background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
+                <span style={{ fontSize:12,color:"var(--color-text-secondary)" }}>Resultado oficial:</span>
+                <span style={{ fontSize:13,fontWeight:500 }}>
+                  Brasil {brazilHome ? result.homeGoals : result.awayGoals}
+                  {" × "}
+                  {brazilHome ? result.awayGoals : result.homeGoals} {opponent}
+                </span>
+              </div>
             )}
           </div>
         );
@@ -459,7 +549,7 @@ function BrazilTab({ p, adminResults, onBrazil }) {
 }
 
 // ─── GROUPS TAB ───────────────────────────────────────────────────────────────
-function GroupsTab({ p, adminResults, onGroup }) {
+function GroupsTab({ p, adminResults, onGroup, readOnly }) {
   return (
     <div>
       <div style={{ background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"10px 14px",marginBottom:14 }}>
@@ -481,7 +571,8 @@ function GroupsTab({ p, adminResults, onGroup }) {
               {["first","second"].map((field,fi)=>(
                 <div key={field} style={{ marginBottom:fi===0?8:0 }}>
                   <label style={{ fontSize:11,color:"var(--color-text-secondary)" }}>{fi===0?"1º colocado":"2º colocado"}</label>
-                  <select value={guess[field]||""} onChange={e=>onGroup(group.id,field,e.target.value)} style={{ width:"100%",marginTop:3 }}>
+                  <select value={guess[field]||""} onChange={e=>onGroup(group.id,field,e.target.value)}
+                    disabled={readOnly} style={{ width:"100%",marginTop:3,opacity:readOnly?0.7:1 }}>
                     <option value="">Selecione...</option>
                     {group.teams.map(t=><option key={t} value={t}>{FLAGS[t]||""} {t}</option>)}
                   </select>
@@ -501,7 +592,7 @@ function GroupsTab({ p, adminResults, onGroup }) {
 }
 
 // ─── KNOCKOUT TAB ─────────────────────────────────────────────────────────────
-function KOTab({ p, adminResults, onKO }) {
+function KOTab({ p, adminResults, onKO, readOnly }) {
   const [activeRound, setActiveRound] = useState("r32");
   const unlocked = adminResults.knockoutUnlocked;
   const koGuesses = p.knockout || {};
@@ -582,7 +673,7 @@ function KOTab({ p, adminResults, onKO }) {
                 const isP=picked===team;
                 const bg=COLORS[team]||"#888";
                 return (
-                  <div key={ti} onClick={()=>team&&t1&&t2&&onKO(activeRound,mi,team)} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 10px",cursor:team&&t1&&t2?"pointer":"default",background:isP?bg+"1a":"transparent",borderTop:ti>0?"0.5px solid var(--color-border-tertiary)":"none",transition:"background 0.12s",opacity:!team?0.4:1 }}>
+                  <div key={ti} onClick={()=>!readOnly&&team&&t1&&t2&&onKO(activeRound,mi,team)} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 10px",cursor:!readOnly&&team&&t1&&t2?"pointer":"default",background:isP?bg+"1a":"transparent",borderTop:ti>0?"0.5px solid var(--color-border-tertiary)":"none",transition:"background 0.12s",opacity:!team?0.4:1 }}>
                     {team?<Flag team={team} size={24}/>:<span style={{ width:24,height:24,borderRadius:"50%",background:"var(--color-background-secondary)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:12 }}>?</span>}
                     <span style={{ fontSize:12,flex:1,fontWeight:isP?500:400,lineHeight:1.2 }}>{team||"A definir"}</span>
                     {isP&&!official&&<span style={{ width:8,height:8,borderRadius:"50%",background:bg,flexShrink:0 }}/>}
@@ -713,6 +804,28 @@ function AdminPanel({ results, setResults, onSave, saveStatus, onBack, participa
   );
 }
 
+// ─── TOGGLE CARD helper ───────────────────────────────────────────────────────
+function ToggleCard({ title, description, active, labelOn, labelOff, colorOn="success", onToggle }) {
+  const bgMap = { success:"var(--color-background-success)", warning:"var(--color-background-warning)", info:"var(--color-background-info)" };
+  const clMap = { success:"var(--color-text-success)", warning:"var(--color-text-warning)", info:"var(--color-text-info)" };
+  return (
+    <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:10 }}>
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:12 }}>
+        <div style={{ flex:1 }}>
+          <p style={{ margin:0,fontWeight:500,fontSize:14 }}>{title}</p>
+          <p style={{ margin:"4px 0 0",fontSize:13,color:"var(--color-text-secondary)" }}>{description}</p>
+        </div>
+        <button onClick={onToggle} style={{
+          background:active?bgMap[colorOn]:"var(--color-background-secondary)",
+          color:active?clMap[colorOn]:"var(--color-text-primary)",
+          border:"0.5px solid var(--color-border-tertiary)",padding:"8px 16px",
+          borderRadius:"var(--border-radius-md)",fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0
+        }}>{active?labelOn:labelOff}</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── ADMIN KO ─────────────────────────────────────────────────────────────────
 function AdminKO({ results, setResults, onSave }) {
   const [sub, setSub] = useState("bracket");
@@ -823,23 +936,55 @@ function AdminKO({ results, setResults, onSave }) {
       )}
       {sub==="vis" && (
         <div>
-          <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.25rem",marginBottom:12 }}>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-              <div>
-                <p style={{ margin:0,fontWeight:500 }}>Bracket visível para participantes</p>
-                <p style={{ margin:"4px 0 0",fontSize:13,color:"var(--color-text-secondary)" }}>
-                  {results.knockoutUnlocked?"✓ Participantes já podem preencher o bracket.":"Bloqueado para participantes."}
-                </p>
-              </div>
-              <button onClick={toggleUnlock} style={{ background:results.knockoutUnlocked?"var(--color-background-success)":"var(--color-background-secondary)",color:results.knockoutUnlocked?"var(--color-text-success)":"var(--color-text-primary)",border:"0.5px solid var(--color-border-tertiary)",padding:"8px 18px",borderRadius:"var(--border-radius-md)",fontWeight:500,cursor:"pointer" }}>
-                {results.knockoutUnlocked?"🔓 Bloquear":"🔒 Liberar"}
-              </button>
-            </div>
-          </div>
-          <p style={{ fontSize:13,color:"var(--color-text-secondary)",lineHeight:1.6 }}>
-            Fluxo recomendado:<br/>
-            1. Preencha os 16 confrontos em "Chaveamento R32".<br/>
-            2. Libere o bracket aqui para os participantes preencherem.<br/>
+          {/* Toggle: lock/unlock guesses */}
+          <ToggleCard
+            title="Bloquear palpites"
+            description={results.guessesLocked
+              ? "Palpites bloqueados — ninguém pode editar ou entrar no bolão."
+              : "Aberto — participantes podem entrar e editar palpites."}
+            active={results.guessesLocked}
+            labelOn="🔒 Bloquear"
+            labelOff="🔓 Desbloquear"
+            colorOn="warning"
+            onToggle={()=>{
+              const r={...results, guessesLocked:!results.guessesLocked};
+              setResults(r); onSave(r);
+            }}
+          />
+
+          {/* Toggle: show/hide guesses to everyone */}
+          <ToggleCard
+            title="Revelar palpites para todos"
+            description={results.guessesVisible
+              ? "Palpites visíveis — qualquer participante pode ver os chutes dos outros no ranking."
+              : "Ocultos — cada um só vê os próprios palpites."}
+            active={results.guessesVisible}
+            labelOn="👁️ Ocultar"
+            labelOff="👁️ Revelar"
+            colorOn="info"
+            onToggle={()=>{
+              const r={...results, guessesVisible:!results.guessesVisible};
+              setResults(r); onSave(r);
+            }}
+          />
+
+          {/* Toggle: unlock knockout bracket */}
+          <ToggleCard
+            title="Liberar bracket do mata-mata"
+            description={results.knockoutUnlocked
+              ? "Participantes já podem preencher o bracket."
+              : "Bloqueado — preencha o chaveamento R32 antes de liberar."}
+            active={results.knockoutUnlocked}
+            labelOn="🔒 Bloquear"
+            labelOff="🔓 Liberar"
+            colorOn="success"
+            onToggle={toggleUnlock}
+          />
+
+          <p style={{ fontSize:13,color:"var(--color-text-secondary)",lineHeight:1.6,marginTop:16 }}>
+            Fluxo recomendado para o mata-mata:<br/>
+            1. Preencha os confrontos em "Chaveamento R32".<br/>
+            2. Libere o bracket acima.<br/>
             3. Registre os vencedores em "Resultados" conforme os jogos acontecerem.<br/>
             A pontuação é atualizada automaticamente para todos.
           </p>
@@ -850,7 +995,7 @@ function AdminKO({ results, setResults, onSave }) {
 }
 
 // ─── RANKING ─────────────────────────────────────────────────────────────────
-function RankingScreen({ sorted, getTotal, onBack, currentUid }) {
+function RankingScreen({ sorted, getTotal, onBack, currentUid, guessesVisible, onViewGuesses }) {
   return (
     <div style={{ maxWidth:600,margin:"0 auto",padding:"1.5rem 1rem" }}>
       <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem" }}>
@@ -860,18 +1005,27 @@ function RankingScreen({ sorted, getTotal, onBack, currentUid }) {
         <h2 style={{ margin:0 }}>Ranking geral</h2>
         <span style={{ marginLeft:"auto",fontSize:12,color:"var(--color-text-tertiary)" }}>ao vivo 🔴</span>
       </div>
+      {guessesVisible && (
+        <div style={{ background:"var(--color-background-info)",border:"0.5px solid var(--color-border-info)",borderRadius:"var(--border-radius-md)",padding:"10px 14px",marginBottom:12,fontSize:13,color:"var(--color-text-info)" }}>
+          👁️ Palpites revelados — clique em qualquer participante para ver os chutes dele
+        </div>
+      )}
       {sorted.length===0&&<p style={{ color:"var(--color-text-secondary)",textAlign:"center",padding:"2rem" }}>Nenhum participante ainda.</p>}
       {sorted.map((p,i)=>{
         const total=getTotal(p);
         const isMe=p.uid===currentUid;
         const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
+        const clickable = guessesVisible && !isMe;
         return (
-          <div key={p.uid} style={{ background:"var(--color-background-primary)",border:isMe?"1.5px solid var(--color-border-info)":"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:8,display:"flex",alignItems:"center",gap:12 }}>
+          <div key={p.uid}
+            onClick={clickable ? ()=>onViewGuesses(p.uid) : undefined}
+            style={{ background:"var(--color-background-primary)",border:isMe?"1.5px solid var(--color-border-info)":"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:8,display:"flex",alignItems:"center",gap:12,cursor:clickable?"pointer":"default",transition:"background 0.12s" }}>
             <span style={{ width:28,textAlign:"center",fontSize:i<3?18:14,color:"var(--color-text-secondary)" }}>{medal||`#${i+1}`}</span>
             <div style={{ flex:1 }}>
               <p style={{ margin:0,fontWeight:500,fontSize:15 }}>{p.name}{isMe&&<span style={{ fontSize:12,color:"var(--color-text-info)",marginLeft:6 }}>você</span>}</p>
             </div>
             <span style={{ fontSize:20,fontWeight:500 }}>{total}</span>
+            {clickable && <i className="ti ti-eye" style={{ color:"var(--color-text-tertiary)",fontSize:16 }}/>}
           </div>
         );
       })}
