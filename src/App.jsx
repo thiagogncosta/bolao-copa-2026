@@ -508,7 +508,7 @@ function BrazilTab({ p, adminResults, onBrazil, readOnly }) {
                   )}
                   readOnly={readOnly} disabled={readOnly}
                   style={{ width:48,textAlign:"center",fontSize:22,fontWeight:600,padding:"6px 0" }}
-                  placeholder="0"
+                  placeholder="–"
                 />
                 <span style={{ fontSize:16,color:"var(--color-text-tertiary)",fontWeight:300 }}>×</span>
                 <input type="number" min="0" max="20"
@@ -519,7 +519,7 @@ function BrazilTab({ p, adminResults, onBrazil, readOnly }) {
                   )}
                   readOnly={readOnly} disabled={readOnly}
                   style={{ width:48,textAlign:"center",fontSize:22,fontWeight:600,padding:"6px 0" }}
-                  placeholder="0"
+                  placeholder="–"
                 />
               </div>
 
