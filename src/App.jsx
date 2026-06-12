@@ -225,6 +225,7 @@ export default function App() {
       onAdmin={()=>setScreen("admin-login")}
       onRanking={()=>setScreen("ranking")}
       onRules={()=>setScreen("rules")}
+      onViewGuesses={uid=>{ setViewingUid(uid); setScreen("view-guesses"); }}
     />
   );
 
@@ -247,7 +248,7 @@ export default function App() {
   if (screen==="ranking") return (
     <RankingScreen sorted={sorted} getTotal={p=>calcTotal(p,adminResults)}
       onBack={()=>setScreen("home")} currentUid={currentUid}
-      guessesVisible={adminResults.guessesVisible}
+      guessesVisible={adminResults.guessesVisible || adminResults.guessesLocked}
       onViewGuesses={uid=>{ setViewingUid(uid); setScreen("view-guesses"); }}
     />
   );
@@ -316,7 +317,7 @@ function RegisterScreen({ nameInput, setNameInput, onRegister, locked }) {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeScreen({ currentUser, sorted, getTotal, adminResults, onGuesses, onAdmin, onRanking, onRules }) {
+function HomeScreen({ currentUser, sorted, getTotal, adminResults, onGuesses, onAdmin, onRanking, onRules, onViewGuesses }) {
   const locked = adminResults.guessesLocked;
   return (
     <div style={{ maxWidth:480,margin:"0 auto",padding:"2rem 1rem" }}>
@@ -338,7 +339,7 @@ function HomeScreen({ currentUser, sorted, getTotal, adminResults, onGuesses, on
       {locked && (
         <div style={{ background:"var(--color-background-warning)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-md)",padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:8 }}>
           <span style={{ fontSize:16 }}>🔒</span>
-          <p style={{ margin:0,fontSize:13,color:"var(--color-text-warning)",fontWeight:500 }}>Palpites encerrados — edições bloqueadas</p>
+          <p style={{ margin:0,fontSize:13,color:"var(--color-text-warning)",fontWeight:500 }}>Palpites encerrados — clique em qualquer participante para ver os chutes dele</p>
         </div>
       )}
 
@@ -364,15 +365,22 @@ function HomeScreen({ currentUser, sorted, getTotal, adminResults, onGuesses, on
               Ver tudo <i className="ti ti-trophy" />
             </button>
           </div>
-          {sorted.slice(0,6).map((p,i)=>(
-            <div key={p.uid} style={{ display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderTop:i>0?"0.5px solid var(--color-border-tertiary)":"none" }}>
-              <span style={{ fontSize:i<3?16:13,width:24,textAlign:"center" }}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`}</span>
-              <span style={{ flex:1,fontSize:14,fontWeight:p.uid===currentUser?.uid?500:400 }}>
-                {p.name}{p.uid===currentUser?.uid?" (você)":""}
-              </span>
-              <span style={{ fontSize:14,fontWeight:500 }}>{getTotal(p)} pts</span>
-            </div>
-          ))}
+          {sorted.slice(0,6).map((p,i)=>{
+            const isMe = p.uid===currentUser?.uid;
+            const clickable = locked && !isMe;
+            return (
+              <div key={p.uid}
+                onClick={clickable ? ()=>onViewGuesses(p.uid) : undefined}
+                style={{ display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderTop:i>0?"0.5px solid var(--color-border-tertiary)":"none",cursor:clickable?"pointer":"default" }}>
+                <span style={{ fontSize:i<3?16:13,width:24,textAlign:"center" }}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`}</span>
+                <span style={{ flex:1,fontSize:14,fontWeight:isMe?500:400 }}>
+                  {p.name}{isMe?" (você)":""}
+                </span>
+                <span style={{ fontSize:14,fontWeight:500 }}>{getTotal(p)} pts</span>
+                {clickable && <i className="ti ti-eye" style={{ color:"var(--color-text-tertiary)",fontSize:14 }}/>}
+              </div>
+            );
+          })}
           {sorted.length>6 && <p style={{ margin:"8px 0 0",fontSize:12,color:"var(--color-text-tertiary)",textAlign:"center" }}>+{sorted.length-6} participantes</p>}
         </div>
       )}
