@@ -228,8 +228,17 @@ export default function App() {
   // ── Save participant guesses
   async function saveGuesses(updated) {
     setSaveStatus("saving");
-    await setDoc(doc(db, "participants", currentId), updated, { merge:true });
-    setCurrentUser(updated);
+    const cleanDoc = {
+      id: currentUser?.id || currentId,
+      name: currentUser?.name || "",
+      pin: currentUser?.pin != null ? String(currentUser.pin) : "",
+      createdAt: currentUser?.createdAt || serverTimestamp(),
+      brazil: updated.brazil || {},
+      groups: updated.groups || {},
+      knockout: updated.knockout || {},
+    };
+    await setDoc(doc(db, "participants", currentId), cleanDoc);
+    setCurrentUser(cleanDoc);
     setSaveStatus("saved");
     setTimeout(()=>setSaveStatus(""),2000);
   }
@@ -361,7 +370,7 @@ function RegisterScreen({ nameInput, setNameInput, pinInput, setPinInput, loginE
         </button>
 
         <p style={{ margin:"12px 0 0",fontSize:12,color:"var(--color-text-tertiary)",textAlign:"center" }}>
-          O PIN foi enviado pelo administrador do bolão
+          O PIN foi enviado pelo administrador do bolão <span style={{ opacity:0.4 }}>· v16</span>
         </p>
       </div>
 
@@ -440,11 +449,11 @@ function HomeScreen({ currentUser, sorted, getTotal, adminResults, onGuesses, on
             </button>
           </div>
           {sorted.slice(0,6).map((p,i)=>{
-            const isMe = p.uid===currentUser?.uid;
+            const isMe = (p.uid||p.id)===(currentUser?.uid||currentUser?.id);
             const clickable = locked && !isMe;
             return (
-              <div key={p.uid}
-                onClick={clickable ? ()=>onViewGuesses(p.uid) : undefined}
+              <div key={p.uid||p.id}
+                onClick={clickable ? ()=>onViewGuesses(p.uid||p.id) : undefined}
                 style={{ display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderTop:i>0?"0.5px solid var(--color-border-tertiary)":"none",cursor:clickable?"pointer":"default" }}>
                 <span style={{ fontSize:i<3?16:13,width:24,textAlign:"center" }}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`}</span>
                 <span style={{ flex:1,fontSize:14,fontWeight:isMe?500:400 }}>
@@ -474,17 +483,23 @@ function HomeScreen({ currentUser, sorted, getTotal, adminResults, onGuesses, on
 // ─── GUESSES SCREEN ───────────────────────────────────────────────────────────
 function GuessesScreen({ user, adminResults, locked, readOnly, onSave, saveStatus, onBack }) {
   const [tab, setTab] = useState("brasil");
-  const [local, setLocal] = useState(() => ({
-    brazil: user?.brazil || {},
-    groups: user?.groups || {},
-    knockout: user?.knockout || {},
-  }));
+  const [local, setLocal] = useState(() => {
+    const brazil = user?.brazil || {};
+    const groups = {};
+    const srcGroups = user?.groups || {};
+    GROUPS.forEach(g => { if (srcGroups[g.id]) groups[g.id] = srcGroups[g.id]; });
+    const knockout = {};
+    const srcKO = user?.knockout || {};
+    KO_ROUNDS.forEach(r => { if (srcKO[r.id]) knockout[r.id] = srcKO[r.id]; });
+    if (srcKO.r32entrants) knockout.r32entrants = srcKO.r32entrants;
+    return { brazil, groups, knockout };
+  });
 
   const isReadOnly = locked || readOnly;
 
   function handleSave() {
     if (isReadOnly) return;
-    onSave({ ...user, ...local });
+    onSave(local);
   }
 
   function updBrazil(gId, val) {
@@ -1095,12 +1110,12 @@ function RankingScreen({ sorted, getTotal, onBack, currentId, guessesVisible, on
       {sorted.length===0&&<p style={{ color:"var(--color-text-secondary)",textAlign:"center",padding:"2rem" }}>Nenhum participante ainda.</p>}
       {sorted.map((p,i)=>{
         const total=getTotal(p);
-        const isMe=p.uid===currentId;
+        const isMe=(p.uid||p.id)===currentId;
         const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
         const clickable = guessesVisible && !isMe;
         return (
-          <div key={p.uid}
-            onClick={clickable ? ()=>onViewGuesses(p.uid) : undefined}
+          <div key={p.uid||p.id}
+            onClick={clickable ? ()=>onViewGuesses(p.uid||p.id) : undefined}
             style={{ background:"var(--color-background-primary)",border:isMe?"1.5px solid var(--color-border-info)":"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:8,display:"flex",alignItems:"center",gap:12,cursor:clickable?"pointer":"default",transition:"background 0.12s" }}>
             <span style={{ width:28,textAlign:"center",fontSize:i<3?18:14,color:"var(--color-text-secondary)" }}>{medal||`#${i+1}`}</span>
             <div style={{ flex:1 }}>
