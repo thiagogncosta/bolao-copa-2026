@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { auth, db, ensureAuth } from "./firebase.js";
+import { db } from "./firebase.js";
 import {
   doc, getDoc, setDoc, collection, onSnapshot, serverTimestamp
 } from "firebase/firestore";
@@ -130,35 +130,43 @@ function TabBar({ tabs, active, onChange }) {
 }
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
+// Name is normalized to lowercase+trimmed and used as the Firestore document ID.
+// This means any device can access the same profile by typing the same name.
+function nameToId(name) {
+  return name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "_");
+}
+
 export default function App() {
   const [screen, setScreen] = useState("loading");
-  const [currentUid, setCurrentUid] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null); // { uid, name, brazil, groups, knockout }
+  const [currentId, setCurrentId] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [nameInput, setNameInput] = useState("");
-  const [participants, setParticipants] = useState({}); // uid → participant data
+  const [pinInput, setPinInput] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [participants, setParticipants] = useState({});
   const [adminResults, setAdminResults] = useState({ brazil:{}, groups:{}, knockout:{}, knockoutUnlocked:false, guessesLocked:false, guessesVisible:false });
   const [adminCode, setAdminCode] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
-  const [viewingUid, setViewingUid] = useState(null); // uid whose guesses we're viewing (read-only)
+  const [viewingUid, setViewingUid] = useState(null);
   const unsubRef = useRef(null);
 
-  // ── Init: sign in anonymously, load admin results, subscribe to participants
   useEffect(() => {
-    ensureAuth().then(user => {
-      setCurrentUid(user.uid);
-      // Check if this uid already has a name registered
-      getDoc(doc(db, "participants", user.uid)).then(snap => {
+    // Check if name is stored locally from a previous session on this device
+    const savedId = localStorage.getItem("bolao_user_id");
+    if (savedId) {
+      getDoc(doc(db, "participants", savedId)).then(snap => {
         if (snap.exists()) {
+          setCurrentId(savedId);
           setCurrentUser(snap.data());
           setScreen("home");
         } else {
+          localStorage.removeItem("bolao_user_id");
           setScreen("register");
         }
       });
-    }).catch(err => {
-      console.error("Auth error", err);
+    } else {
       setScreen("register");
-    });
+    }
 
     // Subscribe to admin results (live)
     const unsubAdmin = onSnapshot(doc(db, "admin", "results"), snap => {
@@ -176,19 +184,42 @@ export default function App() {
     return () => unsubRef.current?.();
   }, []);
 
-  // ── Register name
+  // ── Enter by name + PIN
   async function handleRegister() {
     const name = nameInput.trim(); if (!name) return;
-    const data = { uid:currentUid, name, brazil:{}, groups:{}, knockout:{}, createdAt:serverTimestamp() };
-    await setDoc(doc(db, "participants", currentUid), data);
-    setCurrentUser(data);
-    setScreen("home");
+    const pin = pinInput.trim(); if (!pin) { setLoginError("Digite seu PIN"); return; }
+    const id = nameToId(name);
+    setLoginError("");
+
+    const snap = await getDoc(doc(db, "participants", id));
+    if (snap.exists()) {
+      // Existing profile — validate PIN
+      const data = snap.data();
+      if (String(data.pin) !== String(pin)) {
+        setLoginError("PIN incorreto. Tente novamente.");
+        return;
+      }
+      setCurrentId(id);
+      setCurrentUser(data);
+      localStorage.setItem("bolao_user_id", id);
+      setScreen("home");
+    } else {
+      // New profile — register with chosen PIN
+      if (adminResults.guessesLocked) { setLoginError("Palpites encerrados, não é possível criar novo acesso."); return; }
+      const data = { id, name, pin: String(pin), brazil:{}, groups:{}, knockout:{}, createdAt:serverTimestamp() };
+      await setDoc(doc(db, "participants", id), data);
+      setCurrentId(id);
+      setCurrentUser(data);
+      localStorage.setItem("bolao_user_id", id);
+      setScreen("home");
+    }
   }
 
-  // ── Save participant guesses (debounced via explicit save button)
+  // ── Save participant guesses
   async function saveGuesses(updated) {
     setSaveStatus("saving");
-    await setDoc(doc(db, "participants", currentUid), updated, { merge:true });
+    await setDoc(doc(db, "participants", currentId), updated, { merge:true });
+    setCurrentUser(updated);
     setSaveStatus("saved");
     setTimeout(()=>setSaveStatus(""),2000);
   }
@@ -213,6 +244,8 @@ export default function App() {
 
   if (screen==="register") return (
     <RegisterScreen nameInput={nameInput} setNameInput={setNameInput}
+      pinInput={pinInput} setPinInput={setPinInput}
+      loginError={loginError}
       onRegister={handleRegister} locked={adminResults.guessesLocked} />
   );
 
@@ -247,7 +280,7 @@ export default function App() {
 
   if (screen==="ranking") return (
     <RankingScreen sorted={sorted} getTotal={p=>calcTotal(p,adminResults)}
-      onBack={()=>setScreen("home")} currentUid={currentUid}
+      onBack={()=>setScreen("home")} currentId={currentId}
       guessesVisible={adminResults.guessesVisible || adminResults.guessesLocked}
       onViewGuesses={uid=>{ setViewingUid(uid); setScreen("view-guesses"); }}
     />
@@ -278,7 +311,7 @@ export default function App() {
 }
 
 // ─── REGISTER ────────────────────────────────────────────────────────────────
-function RegisterScreen({ nameInput, setNameInput, onRegister, locked }) {
+function RegisterScreen({ nameInput, setNameInput, pinInput, setPinInput, loginError, onRegister, locked }) {
   return (
     <div style={{ maxWidth:400,margin:"0 auto",padding:"3rem 1rem" }}>
       <div style={{ textAlign:"center",marginBottom:"2rem" }}>
@@ -292,26 +325,39 @@ function RegisterScreen({ nameInput, setNameInput, onRegister, locked }) {
           FAMÍLIA LINDA
         </div>
       </div>
-      {locked ? (
-        <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem",textAlign:"center" }}>
-          <div style={{ fontSize:36,marginBottom:8 }}>🔒</div>
-          <p style={{ margin:"0 0 6px",fontWeight:500,fontSize:16 }}>Palpites encerrados</p>
-          <p style={{ margin:0,fontSize:13,color:"var(--color-text-secondary)" }}>O prazo para entrar no bolão já foi encerrado pelo administrador.</p>
-        </div>
-      ) : (
-        <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem" }}>
-          <p style={{ margin:"0 0 4px",fontWeight:500,fontSize:16 }}>Bem-vindo! 👋</p>
-          <p style={{ margin:"0 0 16px",fontSize:13,color:"var(--color-text-secondary)" }}>Como você quer ser chamado no bolão?</p>
-          <input type="text" placeholder="Seu nome" value={nameInput}
-            onChange={e=>setNameInput(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&onRegister()}
-            style={{ width:"100%",marginBottom:12,fontSize:16 }} autoFocus />
-          <button onClick={onRegister} style={{ width:"100%",fontWeight:500,padding:"10px" }}
-            disabled={!nameInput.trim()}>
-            Entrar no bolão <i className="ti ti-arrow-right" />
-          </button>
-        </div>
-      )}
+
+      <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem" }}>
+        <p style={{ margin:"0 0 16px",fontWeight:500,fontSize:16 }}>
+          {locked ? "Acessar meus palpites 👁️" : "Bem-vindo! 👋"}
+        </p>
+
+        <label style={{ fontSize:12,color:"var(--color-text-secondary)",display:"block",marginBottom:4 }}>Seu nome</label>
+        <input type="text" placeholder="Ex: Thiago" value={nameInput}
+          onChange={e=>setNameInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&onRegister()}
+          style={{ width:"100%",marginBottom:12,fontSize:15 }} autoFocus />
+
+        <label style={{ fontSize:12,color:"var(--color-text-secondary)",display:"block",marginBottom:4 }}>PIN</label>
+        <input type="number" placeholder="PIN de acesso"
+          value={pinInput} onChange={e=>setPinInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&onRegister()}
+          style={{ width:"100%",marginBottom:loginError?8:16,fontSize:15,letterSpacing:"0.15em" }} />
+
+        {loginError && (
+          <p style={{ margin:"0 0 12px",fontSize:13,color:"var(--color-text-danger)",fontWeight:500 }}>
+            ⚠️ {loginError}
+          </p>
+        )}
+
+        <button onClick={onRegister} style={{ width:"100%",fontWeight:500,padding:"10px" }}
+          disabled={!nameInput.trim()||!pinInput.trim()}>
+          {locked ? "Acessar" : "Entrar no bolão"} <i className="ti ti-arrow-right" />
+        </button>
+
+        <p style={{ margin:"12px 0 0",fontSize:12,color:"var(--color-text-tertiary)",textAlign:"center" }}>
+          O PIN foi enviado pelo administrador do bolão
+        </p>
+      </div>
     </div>
   );
 }
@@ -1003,7 +1049,7 @@ function AdminKO({ results, setResults, onSave }) {
 }
 
 // ─── RANKING ─────────────────────────────────────────────────────────────────
-function RankingScreen({ sorted, getTotal, onBack, currentUid, guessesVisible, onViewGuesses }) {
+function RankingScreen({ sorted, getTotal, onBack, currentId, guessesVisible, onViewGuesses }) {
   return (
     <div style={{ maxWidth:600,margin:"0 auto",padding:"1.5rem 1rem" }}>
       <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem" }}>
@@ -1021,7 +1067,7 @@ function RankingScreen({ sorted, getTotal, onBack, currentUid, guessesVisible, o
       {sorted.length===0&&<p style={{ color:"var(--color-text-secondary)",textAlign:"center",padding:"2rem" }}>Nenhum participante ainda.</p>}
       {sorted.map((p,i)=>{
         const total=getTotal(p);
-        const isMe=p.uid===currentUid;
+        const isMe=p.uid===currentId;
         const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
         const clickable = guessesVisible && !isMe;
         return (
