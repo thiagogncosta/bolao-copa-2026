@@ -256,7 +256,8 @@ export default function App() {
     <RegisterScreen nameInput={nameInput} setNameInput={setNameInput}
       pinInput={pinInput} setPinInput={setPinInput}
       loginError={loginError}
-      onRegister={handleRegister} locked={adminResults.guessesLocked} />
+      onRegister={handleRegister} locked={adminResults.guessesLocked}
+      sorted={sorted} getTotal={p=>calcTotal(p,adminResults)} />
   );
 
   if (screen==="home") return (
@@ -321,10 +322,10 @@ export default function App() {
 }
 
 // ─── REGISTER ────────────────────────────────────────────────────────────────
-function RegisterScreen({ nameInput, setNameInput, pinInput, setPinInput, loginError, onRegister, locked }) {
+function RegisterScreen({ nameInput, setNameInput, pinInput, setPinInput, loginError, onRegister, locked, sorted, getTotal }) {
   return (
-    <div style={{ maxWidth:400,margin:"0 auto",padding:"3rem 1rem" }}>
-      <div style={{ textAlign:"center",marginBottom:"2rem" }}>
+    <div style={{ maxWidth:400,margin:"0 auto",padding:"2rem 1rem" }}>
+      <div style={{ textAlign:"center",marginBottom:"1.5rem" }}>
         <div style={{ fontSize:52,marginBottom:8 }}>🏆</div>
         <div style={{ display:"inline-flex",alignItems:"center",gap:6,marginBottom:6 }}>
           <span style={{ fontSize:22 }}>🇧🇷</span>
@@ -336,7 +337,8 @@ function RegisterScreen({ nameInput, setNameInput, pinInput, setPinInput, loginE
         </div>
       </div>
 
-      <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem" }}>
+      {/* Login form */}
+      <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.5rem",marginBottom:"1rem" }}>
         <p style={{ margin:"0 0 16px",fontWeight:500,fontSize:16 }}>
           {locked ? "Acessar meus palpites 👁️" : "Bem-vindo! 👋"}
         </p>
@@ -368,6 +370,28 @@ function RegisterScreen({ nameInput, setNameInput, pinInput, setPinInput, loginE
           O PIN foi enviado pelo administrador do bolão
         </p>
       </div>
+
+      {/* Ranking preview */}
+      {sorted && sorted.length > 0 && (
+        <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.25rem" }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12 }}>
+            <span style={{ fontSize:14,fontWeight:500 }}>Placar ao vivo 🔴</span>
+            <span style={{ fontSize:12,color:"var(--color-text-tertiary)" }}>{sorted.length} participantes</span>
+          </div>
+          {sorted.slice(0,6).map((p,i)=>(
+            <div key={p.uid||p.id||i} style={{ display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderTop:i>0?"0.5px solid var(--color-border-tertiary)":"none" }}>
+              <span style={{ fontSize:i<3?16:13,width:24,textAlign:"center" }}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`}</span>
+              <span style={{ flex:1,fontSize:14 }}>{p.name}</span>
+              <span style={{ fontSize:14,fontWeight:500 }}>{getTotal(p)} pts</span>
+            </div>
+          ))}
+          {sorted.length>6 && (
+            <p style={{ margin:"8px 0 0",fontSize:12,color:"var(--color-text-tertiary)",textAlign:"center" }}>
+              +{sorted.length-6} participantes
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
