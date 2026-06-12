@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase.js";
 import {
-  doc, getDoc, setDoc, collection, onSnapshot, serverTimestamp
+  doc, getDoc, setDoc, collection, onSnapshot, serverTimestamp,
+  query, where, getDocs
 } from "firebase/firestore";
 
 // ─── DADOS OFICIAIS ──────────────────────────────────────────────────────────
@@ -188,30 +189,56 @@ export default function App() {
   async function handleRegister() {
     const name = nameInput.trim(); if (!name) return;
     const pin = pinInput.trim(); if (!pin) { setLoginError("Digite seu PIN"); return; }
-    const id = nameToId(name);
     setLoginError("");
 
-    const snap = await getDoc(doc(db, "participants", id));
-    if (snap.exists()) {
-      // Existing profile — validate PIN
-      const data = snap.data();
+    // Search for existing participant by name (case-insensitive via normalized name field)
+    const normalizedName = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
+    
+    // Query by name field (exact match, case-sensitive as stored)
+    const q = query(collection(db,"participants"), where("name","==",name));
+    const snap = await getDocs(q);
+
+    if (!snap.empty) {
+      // Found by exact name — validate PIN
+      const docSnap = snap.docs[0];
+      const data = docSnap.data();
       if (String(data.pin) !== String(pin)) {
         setLoginError("PIN incorreto. Tente novamente.");
         return;
       }
-      setCurrentId(id);
+      const docId = docSnap.id;
+      setCurrentId(docId);
       setCurrentUser(data);
-      localStorage.setItem("bolao_user_id", id);
+      localStorage.setItem("bolao_user_id", docId);
       setScreen("home");
     } else {
-      // New profile — register with chosen PIN
-      if (adminResults.guessesLocked) { setLoginError("Palpites encerrados, não é possível criar novo acesso."); return; }
-      const data = { id, name, pin: String(pin), brazil:{}, groups:{}, knockout:{}, createdAt:serverTimestamp() };
-      await setDoc(doc(db, "participants", id), data);
-      setCurrentId(id);
-      setCurrentUser(data);
-      localStorage.setItem("bolao_user_id", id);
-      setScreen("home");
+      // No match — try case-insensitive by normalized name
+      const q2 = query(collection(db,"participants"), where("id","==",normalizedName));
+      const snap2 = await getDocs(q2);
+
+      if (!snap2.empty) {
+        const docSnap = snap2.docs[0];
+        const data = docSnap.data();
+        if (String(data.pin) !== String(pin)) {
+          setLoginError("PIN incorreto. Tente novamente.");
+          return;
+        }
+        const docId = docSnap.id;
+        setCurrentId(docId);
+        setCurrentUser(data);
+        localStorage.setItem("bolao_user_id", docId);
+        setScreen("home");
+      } else {
+        // Truly new participant
+        if (adminResults.guessesLocked) { setLoginError("Palpites encerrados, não é possível criar novo acesso."); return; }
+        const newId = normalizedName + "_" + Date.now();
+        const data = { id:newId, name, pin:String(pin), brazil:{}, groups:{}, knockout:{}, createdAt:serverTimestamp() };
+        await setDoc(doc(db,"participants",newId), data);
+        setCurrentId(newId);
+        setCurrentUser(data);
+        localStorage.setItem("bolao_user_id", newId);
+        setScreen("home");
+      }
     }
   }
 
